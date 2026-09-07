@@ -116,6 +116,9 @@ h1{font-size:25px;font-weight:800;letter-spacing:-.021em;margin:0;line-height:1.
 .savechip[data-s="pending"] .dot{background:var(--s2)}
 .savechip[data-s="local"] .dot{background:var(--s2)}
 .savechip[data-s="error"] .dot{background:var(--bad)}
+.hdr-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+a.linkbtn{font-size:12.5px;color:var(--s1);text-decoration:none;border:1px solid var(--rule);border-radius:999px;padding:5px 11px;background:var(--surface);white-space:nowrap}
+a.linkbtn:hover{border-color:var(--s1)}
 
 /* ---------- cards ---------- */
 .card{background:var(--surface);border:1px solid var(--rule);border-radius:8px;box-shadow:var(--shadow)}
@@ -284,7 +287,11 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
       <h1>Zetamac Ledger</h1>
       <p class="tagline">Every run, every number, plotted against the score you're chasing.</p>
     </div>
-    <div id="saveChip" class="savechip mono" data-s="idle"><span class="dot"></span><span id="saveText">Loading</span></div>
+    <div class="hdr-right">
+      <a class="linkbtn" href="https://claude.ai/code/artifact/ba76837c-ae48-4e52-9753-ab985ead875a" target="_blank" rel="noopener">Trainer ↗</a>
+      <a class="linkbtn" href="https://arithmetic.zetamac.com/" target="_blank" rel="noopener">Zetamac ↗</a>
+      <div id="saveChip" class="savechip mono" data-s="idle"><span class="dot"></span><span id="saveText">Loading</span></div>
+    </div>
   </header>
 
   <div id="roNote" class="ro-note" hidden>You're viewing a read-only copy of this ledger, so new runs can't be logged here. The charts and the full log below are all live.</div>
@@ -453,7 +460,7 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
   </details>
 
   <footer>
-    Scores are only comparable within one set of game settings and one player — treat the reference points as rough community folklore, not a cutoff. What matters here is the slope of your own line.
+    Scores are only comparable within one set of game settings and one player — treat the reference points as rough community folklore, not a cutoff. What matters here is the slope of your own line. To work on the slope itself, drill in the <a href="https://claude.ai/code/artifact/ba76837c-ae48-4e52-9753-ab985ead875a" target="_blank" rel="noopener" style="color:var(--s1)">Trainer</a>.
   </footer>
 </div>
 
@@ -552,7 +559,7 @@ function normalize(st){
     xMode: st.xMode==="date" ? "date" : "session",
     settingsUpdatedAt: Number(st.settingsUpdatedAt)||0,
     configs: Array.isArray(st.configs)&&st.configs.length ? st.configs.slice() : d.configs,
-    entries: Array.isArray(st.entries) ? st.entries.filter(function(e){ return e && e.id && typeof e.score==="number"; }) : []
+    entries: Array.isArray(st.entries) ? st.entries.filter(function(e){ return e && e.id && typeof e.score==="number" && isFinite(e.ts); }) : []
   };
   if(!out.configs.some(function(c){return c.id==="std";})) out.configs.unshift(d.configs[0]);
   return out;
@@ -579,6 +586,8 @@ function mergeState(a,b){
   out.configs = Array.from(cm.values());
   return out;
 }
+/* configs that have not been removed; removal is a tombstone so it survives merges with older copies */
+function liveCfgs(){ return (S.configs||[]).filter(function(c){ return !c.deleted; }); }
 function readEmbedded(){
   try {
     var raw = document.getElementById("log").textContent;
@@ -595,7 +604,10 @@ function writeLocal(){
 /* ============================================================
    Saving — files publish first, whole-page publish as fallback
    ============================================================ */
-var saveTimer=null, saveState="idle", retried=false;
+var saveTimer=null, saveState="idle", retried=false, filesFormUnavailable=false;
+var STASH_KEY="zetamac-ledger-stash";
+function stashInputs(){ try { sessionStorage.setItem(STASH_KEY, JSON.stringify({score:$("#score").value, note:$("#entryNote").value, when:$("#entryWhen").value})); } catch(e){} }
+function restoreInputs(){ try { var raw=sessionStorage.getItem(STASH_KEY); if(!raw) return; sessionStorage.removeItem(STASH_KEY); var v=JSON.parse(raw); if(v.score) $("#score").value=v.score; if(v.note) $("#entryNote").value=v.note; if(v.when) $("#entryWhen").value=v.when; renderPreview(); } catch(e){} }
 function setSave(kind, text){
   saveState=kind;
   $("#saveChip").setAttribute("data-s", kind);
@@ -614,6 +626,7 @@ function goReadOnly(){
   $("#roNote").hidden = false;
   $("#tape").hidden = true;
   setSave("local","Read-only");
+  renderAll();
 }
 async function publishWholePage(){
   var res = await fetch(location.href, {cache:"no-store"});
@@ -624,19 +637,22 @@ async function publishWholePage(){
   if(!re.test(src)) throw new Error("no data block");
   var json = payload().replace(/</g,"\\u003c").replace(/>/g,"\\u003e");
   src = src.replace(re, function(_m,a,_b,c){ return a + json + c; });
+  stashInputs(); // the html form reloads every open view, this one included
   await artifactNS.publish(src);
 }
+function reloadSoon(){ setSave("pending","Newer version — reloading"); setTimeout(function(){ location.reload(); }, 800); }
 async function runSave(){
   writeLocal();
   if(readOnly || !artifactNS){ setSave("local","Saved on this device"); return; }
   try {
+    if(filesFormUnavailable) throw {code:"capability_disabled"};
     await artifactNS.publish({"data/log.json": payload()});
     retried=false;
     setSave("saved","Saved");
     return;
   } catch(err){
     var code = err && err.code;
-    if(code==="conflict"){ setSave("pending","Newer version — reloading"); return; }
+    if(code==="conflict"){ reloadSoon(); return; }
     if(code==="not_writer" || code==="not_granted" || code==="not_declared"){ goReadOnly(); return; }
     if(code==="rate_limited"){
       setSave("pending","Saving…");
@@ -645,10 +661,17 @@ async function runSave(){
     if(code==="upstream_error" && !retried){
       retried=true; clearTimeout(saveTimer); saveTimer=setTimeout(runSave, 1500+Math.random()*1500); return;
     }
+    // the files form is not available in this view (or the call shape was refused): use the whole-page
+    // form from now on rather than paying a failed call before every save
+    if(code==="capability_disabled" || code==="capability_removed" || code==="transform_error") filesFormUnavailable=true;
     try {
       await publishWholePage();
+      retried=false;
       setSave("saved","Saved");
     } catch(e2){
+      var c2 = e2 && e2.code;
+      if(c2==="conflict"){ reloadSoon(); return; }
+      if(c2==="not_writer" || c2==="not_granted" || c2==="not_declared"){ goReadOnly(); return; }
       setSave("local","Saved on this device only");
     }
   }
@@ -667,7 +690,7 @@ function forChart(){
 }
 function cfgById(id){
   for(var i=0;i<S.configs.length;i++) if(S.configs[i].id===id) return S.configs[i];
-  return S.configs[0];
+  return liveCfgs()[0] || S.configs[0];
 }
 function rolling(list, w){
   var out=[];
@@ -720,7 +743,7 @@ function stats(){
   var idx = list.map(function(_,i){ return i; });
   var perRun = list.length>=4 ? slope(idx, scores) : 0;
   var perDay = 0;
-  if(list.length>=4){
+  if(list.length>=4 && dailyCounts(list).size>=3 && (list[list.length-1].ts-list[0].ts)>=2*DAY){
     var t0 = list[0].ts;
     perDay = slope(list.map(function(e){ return (e.ts-t0)/DAY; }), scores);
   }
@@ -741,15 +764,15 @@ function renderControls(){
   [sel,bulk].forEach(function(node){
     var keep = node.value;
     node.innerHTML="";
-    S.configs.forEach(function(c){
+    liveCfgs().forEach(function(c){
       node.appendChild(new Option(c.name+" · "+c.seconds+"s", c.id));
     });
-    if(keep && S.configs.some(function(c){return c.id===keep;})) node.value=keep;
+    if(keep && liveCfgs().some(function(c){return c.id===keep;})) node.value=keep;
   });
   var keepF = filterCfg;
   filt.innerHTML="";
   filt.appendChild(new Option("All games","all"));
-  S.configs.forEach(function(c){ filt.appendChild(new Option(c.name, c.id)); });
+  liveCfgs().forEach(function(c){ filt.appendChild(new Option(c.name, c.id)); });
   filt.value = keepF;
   if(filt.value !== keepF){ filterCfg = "all"; filt.value = "all"; } // the filtered game was removed
 
@@ -766,7 +789,7 @@ function renderControls(){
 function renderCfgList(){
   var box = $("#cfgList");
   box.innerHTML="";
-  S.configs.forEach(function(c){
+  liveCfgs().forEach(function(c){
     var used = live().filter(function(e){ return e.cfg===c.id; }).length;
     var row = el("div");
     row.style.cssText="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px";
@@ -778,7 +801,7 @@ function renderCfgList(){
     if(c.id!=="std" && used===0){
       var del = el("button","ghost","Remove");
       del.addEventListener("click", function(){
-        S.configs = S.configs.filter(function(x){ return x.id!==c.id; });
+        c.deleted = true; c.updatedAt = Date.now(); // tombstone, not removal: the embedded copy would resurrect it
         S.settingsUpdatedAt = Date.now();
         renderAll(); scheduleSave();
       });
@@ -1352,8 +1375,8 @@ function editorRow(e){
   var save = el("button","primary","Save");
   var cancel = el("button",null,"Cancel");
   function commit(){
-    var n = Number(sc.value);
-    if(!isFinite(n) || n<0){ sc.focus(); return; }
+    var rawS = sc.value.trim(), n = Number(rawS);
+    if(!rawS || !isFinite(n) || n<0){ sc.focus(); return; }
     var t = Date.parse(wh.value);
     e.score = Math.round(n);
     if(!isNaN(t)) e.ts = t;
@@ -1421,9 +1444,12 @@ function parseBulk(text, cfgId){
     if(!isFinite(score) || score<0 || score>10000){ bad++; return; }
     var ts = Date.now(), note="";
     if(parts.length>1 && parts[1]){
-      var t = Date.parse(parts[1].replace(" ","T"));
+      var dateLike = /^\d{4}-\d{2}-\d{2}/.test(parts[1]) || /\d[\/.-]\d/.test(parts[1]) || /[A-Za-z]{3}/.test(parts[1]);
+      var t = dateLike ? Date.parse(parts[1].replace(" ","T")) : NaN;
       if(!isNaN(t)) {
-        ts = /\d:\d/.test(parts[1]) ? t : t + 12*3600000 + new Date(t).getTimezoneOffset()*60000;
+        // an ISO date with no time parses as UTC midnight; shift it to local noon so it lands on the right day
+        var isoDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(parts[1]);
+        ts = /\d:\d/.test(parts[1]) ? t : (isoDateOnly ? t + 12*3600000 + new Date(t).getTimezoneOffset()*60000 : t + 12*3600000);
         note = parts.slice(2).join(", ");
       } else {
         note = parts.slice(1).join(", ");
@@ -1562,6 +1588,7 @@ function boot(){
   setWhenNow();
   wire();
   renderAll();
+  restoreInputs();
   setSave("idle", "Saved on this device");
   if(document.fonts && document.fonts.ready) document.fonts.ready.then(renderChartsOnly).catch(function(){});
 

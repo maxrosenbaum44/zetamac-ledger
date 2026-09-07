@@ -1363,7 +1363,7 @@ function editorRow(e){
   sc.className="mono"; sc.style.width="86px";
   var wh = el("input"); wh.type="datetime-local"; wh.value = toLocalInput(e.ts);
   var cf = el("select");
-  S.configs.forEach(function(c){ cf.appendChild(new Option(c.name+" · "+c.seconds+"s", c.id)); });
+  liveCfgs().forEach(function(c){ cf.appendChild(new Option(c.name+" · "+c.seconds+"s", c.id)); });
   cf.value = e.cfg;
   var nt = el("input"); nt.type="text"; nt.value = e.note||""; nt.placeholder="Note"; nt.style.minWidth="180px";
 

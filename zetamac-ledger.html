@@ -107,7 +107,9 @@ body{
 
 /* ---------- header ---------- */
 header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--rule)}
-.brand{display:flex;flex-direction:column;gap:2px}
+.brand{display:flex;align-items:center;gap:13px}
+.brand-t{display:flex;flex-direction:column;gap:2px;min-width:0}
+.logo{flex:none;display:block;filter:drop-shadow(0 2px 6px rgba(42,120,214,.35))}
 h1{font-size:25px;font-weight:800;letter-spacing:-.021em;margin:0;line-height:1.1}
 .tagline{font-size:13px;color:var(--ink-2);margin:0}
 .savechip{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;padding:5px 10px;border:1px solid var(--rule);border-radius:999px;background:var(--surface);color:var(--ink-2);white-space:nowrap}
@@ -195,7 +197,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .bench-row .bar{height:5px;border-radius:2px;background:var(--s1);opacity:.28;flex:none}
 .bench-row.hit .bar{opacity:.9}
 
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;overflow:hidden;box-shadow:var(--shadow)}
 .tile{background:var(--surface);padding:13px 15px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
 .tile .v{font-family:"IBM Plex Mono",monospace;font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
 .tile .n{font-size:11.5px;color:var(--muted);line-height:1.35}
@@ -269,6 +271,7 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 @media (max-width:860px){
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
   .top{grid-template-columns:1fr}
   .duo{grid-template-columns:1fr}
   .tape-actions{border-left:0}
@@ -283,9 +286,12 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
 
   <header>
     <div class="brand">
-      <p class="eyebrow">Arithmetic drill log</p>
-      <h1>Zetamac Ledger</h1>
-      <p class="tagline">Every run, every number, plotted against the score you're chasing.</p>
+      <svg class="logo" viewBox="0 0 32 32" width="34" height="34" aria-hidden="true"><rect x="1" y="1" width="30" height="30" rx="8" fill="var(--s1)"/><path d="M10 10h12L10 22h12" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="24.5" r="3.4" fill="var(--s2)" stroke="var(--surface)" stroke-width="1.6"/></svg>
+      <div class="brand-t">
+        <p class="eyebrow">Arithmetic drill log</p>
+        <h1>Zetamac Ledger</h1>
+        <p class="tagline">Every run, every number, plotted against the score you're chasing.</p>
+      </div>
     </div>
     <div class="hdr-right">
       <a class="linkbtn" href="https://claude.ai/code/artifact/ba76837c-ae48-4e52-9753-ab985ead875a" target="_blank" rel="noopener">Trainer ↗</a>
@@ -410,6 +416,18 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
     </section>
   </div>
 
+  <!-- ============ WEEKS ============ -->
+  <section class="card">
+    <div class="card-h"><div><h2>Week by week</h2><p class="sub" id="wkSub">Monday to Sunday</p></div></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Week</th><th class="num">Runs</th><th class="num">Average</th><th class="num">Median</th><th class="num">Best</th><th class="num">vs week before</th></tr></thead>
+        <tbody id="wkBody"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="wkEmpty">Comes alive once runs are logged.</div>
+  </section>
+
   <!-- ============ LOG ============ -->
   <section class="card">
     <div class="card-h">
@@ -464,7 +482,7 @@ footer{font-size:12px;color:var(--muted);text-align:center;padding-top:6px;max-w
   </footer>
 </div>
 
-<script id="log" type="application/json">{"v": 1, "target": 60, "window": 5, "xMode": "session", "settingsUpdatedAt": 0, "configs": [{"id": "std", "name": "Standard 120s", "seconds": 120, "ops": "+ − × ÷", "updatedAt": 0}], "entries": []}</script>
+<script id="log" type="application/json"></script>
 
 <script>
 (function(){
@@ -747,12 +765,19 @@ function stats(){
     var t0 = list[0].ts;
     perDay = slope(list.map(function(e){ return (e.ts-t0)/DAY; }), scores);
   }
+  // peak form: the best the rolling average has ever been, and when
+  var peak=null, peakAt=null;
+  roll.forEach(function(v,i){ if(i>=w-1 && (peak==null || v>peak)){ peak=v; peakAt=list[i].ts; } });
+  // this week vs last: calendar weeks are arbitrary, so use the last 7 days against the 7 before
+  var now=Date.now(), wk=list.filter(function(e){ return e.ts>now-7*DAY; }).map(function(e){return e.score;}), wkPrev=list.filter(function(e){ return e.ts<=now-7*DAY && e.ts>now-14*DAY; }).map(function(e){return e.score;});
+  var first5=scores.slice(0,5), last5=scores.slice(-5);
   return {
     list:list, scores:scores, roll:roll, form:form, best:best, bestEntry:bestEntry,
     last10:last10, prev10:prev10, sec:sec,
     totalProblems:totalProblems, totalSec:totalSec,
     streak:st, perRun:perRun, perDay:perDay,
-    days: dailyCounts(list).size
+    days: dailyCounts(list).size,
+    peak:peak, peakAt:peakAt, week:wk, weekPrev:wkPrev, first5:first5, last5:last5
   };
 }
 
@@ -971,13 +996,61 @@ function renderTiles(st){
   }
   box.appendChild(t2);
 
+  box.appendChild(tile(st.last10.length?String(median(st.last10)):"—","Median of last 10 · ignores one-off spikes"));
   box.appendChild(tile(st.last10.length>1?"±"+f1(stdev(st.last10)):"—","Spread of last 10 · lower is steadier"));
+
+  var trend = st.list.length>=4 ? (st.perRun>=0?"+":"−")+f2(Math.abs(st.perRun*10)) : "—";
+  box.appendChild(tile(trend, st.list.length>=4?"Points gained per 10 runs · fitted slope":"Trend · needs 4+ runs"));
+  var t6 = tile(st.week.length?f1(mean(st.week)):"—", st.week.length?"Last 7 days · "+st.week.length+" run"+(st.week.length===1?"":"s"):"Last 7 days · no runs");
+  if(st.week.length && st.weekPrev.length){
+    var dw=mean(st.week)-mean(st.weekPrev), dlw=el("span","delta");
+    dlw.setAttribute("data-dir", dw>0.05?"up":(dw<-0.05?"down":"flat")); dlw.textContent=(dw>0.05?"▲ +":(dw<-0.05?"▼ −":"= "))+f1(Math.abs(dw));
+    dlw.style.marginLeft="7px"; dlw.style.fontSize="12px"; t6.querySelector(".v").appendChild(dlw);
+    t6.querySelector(".n").textContent="Last 7 days vs the 7 before · "+st.week.length+" run"+(st.week.length===1?"":"s");
+  }
+  box.appendChild(t6);
+  box.appendChild(tile(st.peak!=null?f1(st.peak):"—", st.peak!=null?"Peak form · best "+S.window+"-run average, "+fmtDate(st.peakAt):"Peak form · needs "+S.window+" runs"));
+  var t8 = tile(st.last5.length>=5&&st.list.length>=10?f1(mean(st.last5)):"—", "Since the start · first 5 → last 5");
+  if(st.list.length>=10){
+    var ds=mean(st.last5)-mean(st.first5), dls=el("span","delta");
+    dls.setAttribute("data-dir", ds>0.05?"up":(ds<-0.05?"down":"flat")); dls.textContent=(ds>0.05?"▲ +":(ds<-0.05?"▼ −":"= "))+f1(Math.abs(ds));
+    dls.style.marginLeft="7px"; dls.style.fontSize="12px"; t8.querySelector(".v").appendChild(dls);
+    t8.querySelector(".n").textContent="Since the start · first 5 averaged "+f1(mean(st.first5))+", last 5 "+f1(mean(st.last5));
+  }
+  box.appendChild(t8);
+
   box.appendChild(tile(st.form!=null?f2(st.sec/Math.max(1,st.form))+"s":"—","Seconds per problem, at current form"));
   box.appendChild(tile(st.list.length?String(st.list.length):"—","Runs logged · "+st.days+" day"+(st.days===1?"":"s")));
   box.appendChild(tile(st.streak.current?String(st.streak.current)+"d":"0d","Current streak · best "+st.streak.longest+"d"));
   box.appendChild(tile(st.totalProblems?st.totalProblems.toLocaleString():"—","Problems solved · "+Math.round(st.totalSec/60)+" min drilled"));
-  var trend = st.list.length>=4 ? (st.perRun>=0?"+":"−")+f2(Math.abs(st.perRun*10)) : "—";
-  box.appendChild(tile(trend, st.list.length>=4?"Points gained per 10 runs":"Trend · needs 4+ runs"));
+}
+/* week by week: runs, average, median, best, and the move against the week before */
+function weekKey(ts){ var d=new Date(ts); d.setHours(0,0,0,0); var dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow); return d.getTime(); }
+function renderWeeks(st){
+  var body=$("#wkBody"); body.innerHTML="";
+  var byWk=new Map();
+  st.list.forEach(function(e){ var k=weekKey(e.ts); if(!byWk.has(k)) byWk.set(k,[]); byWk.get(k).push(e.score); });
+  var keys=Array.from(byWk.keys()).sort(function(a,b){ return a-b; });
+  $("#wkEmpty").hidden=keys.length>0; $("#wkSub").textContent = keys.length ? keys.length+" week"+(keys.length===1?"":"s")+" · Monday to Sunday · newest first" : "Monday to Sunday";
+  var prev=null, rows=[];
+  keys.forEach(function(k){
+    var sc=byWk.get(k), avg=mean(sc);
+    rows.push({k:k, n:sc.length, avg:avg, med:median(sc), best:Math.max.apply(null,sc), d: prev!=null ? avg-prev : null, days:new Set(st.list.filter(function(e){ return weekKey(e.ts)===k; }).map(function(e){ return dayKey(e.ts); })).size});
+    prev=avg;
+  });
+  rows.reverse().slice(0,12).forEach(function(r){
+    var tr=el("tr");
+    tr.appendChild(el("td",null,fmtDate(r.k)+" – "+fmtDate(addDays(r.k,6))));
+    tr.appendChild(el("td","num",r.n+" on "+r.days+" day"+(r.days===1?"":"s")));
+    tr.appendChild(el("td","num",f1(r.avg)));
+    tr.appendChild(el("td","num",String(r.med)));
+    tr.appendChild(el("td","num",String(r.best)));
+    var td=el("td","num");
+    if(r.d==null) td.textContent="—";
+    else { var dl=el("span","delta"); dl.setAttribute("data-dir", r.d>0.05?"up":(r.d<-0.05?"down":"flat")); dl.textContent=(r.d>0.05?"▲ +":(r.d<-0.05?"▼ −":"= "))+f1(Math.abs(r.d)); td.appendChild(dl); }
+    tr.appendChild(td);
+    body.appendChild(tr);
+  });
 }
 
 /* ============================================================
@@ -1488,6 +1561,7 @@ function renderAll(){
   renderHero(st);
   renderMeter(st);
   renderTiles(st);
+  renderWeeks(st);
   renderProgress(st);
   renderDist(st);
   renderHeat(st);
